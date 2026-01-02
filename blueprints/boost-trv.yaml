@@ -1,0 +1,63 @@
+blueprint:
+  name: TRV Boost then Restore
+  description: >
+    Temporarily boosts selected TRVs to a target temperature,
+    then restores each valve to its original setpoint.
+  domain: script
+
+  input:
+    target_temperature:
+      name: Boost temperature
+      default: 22
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+    valves:
+      name: Thermostat valves
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: climate
+
+mode: restart
+
+variables:
+  trvs: !input valves
+
+sequence:
+  # Capture current temperatures
+  - variables:
+      original_temps: >
+        {% set data = dict() %}
+        {% for e in trvs %}
+          {% set t = state_attr(e, 'temperature') %}
+          {% if t is not none %}
+            {% set data = dict(data, **{ e: t }) %}
+          {% endif %}
+        {% endfor %}
+        {{ data }}
+
+  # Set boost temperature
+  - service: climate.set_temperature
+    target:
+      entity_id: !input valves
+    data:
+      temperature: !input target_temperature
+
+  # Wait 20 minutes
+  - delay:
+      minutes: 20
+
+  # Restore previous temperatures
+  - repeat:
+      for_each: "{{ original_temps }}"
+      sequence:
+        - service: climate.set_temperature
+          target:
+            entity_id: "{{ repeat.item.key }}"
+          data:
+            temperature: "{{ repeat.item.value }}"
